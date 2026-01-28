@@ -3099,6 +3099,7 @@ async fn get_oauth_url(state: State<'_, AppState>, provider: String) -> Result<O
         "gemini" => format!("http://127.0.0.1:{}/v0/management/gemini-cli-auth-url?is_webui=true", port),
         "qwen" => format!("http://127.0.0.1:{}/v0/management/qwen-auth-url?is_webui=true", port),
         "iflow" => format!("http://127.0.0.1:{}/v0/management/iflow-auth-url?is_webui=true", port),
+        "kiro" => format!("http://127.0.0.1:{}/v0/management/kiro-auth-url?is_webui=true", port),
         "antigravity" => format!("http://127.0.0.1:{}/v0/management/antigravity-auth-url?is_webui=true", port),
         "vertex" => return Err("Vertex uses service account import, not OAuth. Use import_vertex_credential instead.".to_string()),
         _ => return Err(format!("Unknown provider: {}", provider)),
@@ -3174,6 +3175,7 @@ async fn open_oauth(app: tauri::AppHandle, state: State<'_, AppState>, provider:
         "gemini" => format!("http://127.0.0.1:{}/v0/management/gemini-cli-auth-url?is_webui=true", port),
         "qwen" => format!("http://127.0.0.1:{}/v0/management/qwen-auth-url?is_webui=true", port),
         "iflow" => format!("http://127.0.0.1:{}/v0/management/iflow-auth-url?is_webui=true", port),
+        "kiro" => format!("http://127.0.0.1:{}/v0/management/kiro-auth-url?is_webui=true", port),
         "antigravity" => format!("http://127.0.0.1:{}/v0/management/antigravity-auth-url?is_webui=true", port),
         "vertex" => return Err("Vertex uses service account import, not OAuth. Use import_vertex_credential instead.".to_string()),
         _ => return Err(format!("Unknown provider: {}", provider)),
@@ -6454,6 +6456,7 @@ async fn check_provider_health(state: State<'_, AppState>) -> Result<ProviderHea
             qwen: offline_status.clone(),
             iflow: offline_status.clone(),
             vertex: offline_status.clone(),
+            kiro: offline_status.clone(),
             antigravity: offline_status,
         });
     }
@@ -6512,6 +6515,7 @@ async fn check_provider_health(state: State<'_, AppState>) -> Result<ProviderHea
         qwen: make_status(auth_status.qwen > 0),
         iflow: make_status(auth_status.iflow > 0),
         vertex: make_status(auth_status.vertex > 0),
+        kiro: make_status(auth_status.kiro > 0),
         antigravity: make_status(auth_status.antigravity > 0),
     })
 }
