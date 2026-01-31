@@ -1,6 +1,7 @@
-name: CI
+name: MacOS Build
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -10,70 +11,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "pnpm"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Create placeholder binary for CI check
-        run: |
-          mkdir -p src-tauri/binaries
-          touch src-tauri/binaries/cliproxyapi-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/cliproxyapi-aarch64-apple-darwin
-
-      - name: TypeScript check
-        run: pnpm tsc --noEmit
-
-      - name: Rust check
-        run: cargo check
-        working-directory: src-tauri
-
   build:
     name: Build (${{ matrix.platform }})
-    needs: check
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon (M1/M2/M3...)
           - platform: macOS-ARM
             os: macos-latest
             target: aarch64-apple-darwin
             artifact_path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          # Intel Mac
           - platform: macOS-Intel
-            os: macos-15-intel
+            os: macos-13  # 使用更通用的 Intel Runner 版本 (Ventura)
             target: x86_64-apple-darwin
             artifact_path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-          - platform: Linux
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            artifact_path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
-          - platform: Windows
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -94,12 +47,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -128,16 +75,6 @@ jobs:
               BINARY="cliproxyapi-x86_64-apple-darwin"
               ARCHIVE_TYPE="tar"
               ;;
-            x86_64-unknown-linux-gnu)
-              ASSET_PATTERN="*linux_amd64.tar.gz"
-              BINARY="cliproxyapi-x86_64-unknown-linux-gnu"
-              ARCHIVE_TYPE="tar"
-              ;;
-            x86_64-pc-windows-msvc)
-              ASSET_PATTERN="*windows_amd64.zip"
-              BINARY="cliproxyapi-x86_64-pc-windows-msvc.exe"
-              ARCHIVE_TYPE="zip"
-              ;;
             *)
               echo "Unknown target: ${{ matrix.target }}"
               exit 1
@@ -146,6 +83,7 @@ jobs:
 
           echo "Downloading CLIProxyAPIPlus for ${{ matrix.target }}..."
           cd /tmp
+          # 这里使用了修正后的 Plus 仓库地址
           gh release download --repo router-for-me/CLIProxyAPIPlus --pattern "$ASSET_PATTERN" --clobber
 
           ARCHIVE=$(ls $ASSET_PATTERN 2>/dev/null | head -1)
@@ -157,7 +95,7 @@ jobs:
             tar -xzf "$ARCHIVE"
           fi
 
-          # CLIProxyAPIPlus binary detection (prioritize Plus naming, fallback to original)
+          # 增强后的二进制文件名称检测逻辑 (优先检测 Plus 版本)
           if [ -f "cli-proxy-api-plus" ]; then
             cp cli-proxy-api-plus "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
             chmod +x "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
@@ -184,11 +122,12 @@ jobs:
             exit 1
           fi
 
-          echo "Downloaded:"
+          echo "Downloaded and prepared binary:"
           ls -la "$GITHUB_WORKSPACE/src-tauri/binaries/"
 
       - name: Build Tauri app
         shell: bash
+        # 关闭自动更新工件生成，加快构建速度
         run: pnpm tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
         env:
           APPIMAGELAUNCHER_DISABLE: 1
@@ -199,27 +138,3 @@ jobs:
           name: proxypal-${{ matrix.target }}
           path: ${{ matrix.artifact_path }}
           if-no-files-found: error
-
-  notify:
-    name: Discord Notification
-    needs: [check, build]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Discord notification (success)
-        if: ${{ needs.check.result == 'success' && needs.build.result == 'success' }}
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: |
-          curl -H "Content-Type: application/json" \
-            -d "{\"embeds\": [{\"title\": \"ProxyPal Build Passed\", \"description\": \"**Branch:** \`${{ github.ref_name }}\`\n**Commit:** [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})\n**Author:** ${{ github.actor }}\n\n:package: Artifacts ready for download\", \"color\": 3066993}]}" \
-            $DISCORD_WEBHOOK
-
-      - name: Discord notification (failure)
-        if: ${{ needs.check.result == 'failure' || needs.build.result == 'failure' }}
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: |
-          curl -H "Content-Type: application/json" \
-            -d "{\"embeds\": [{\"title\": \"ProxyPal Build Failed\", \"description\": \"**Branch:** \`${{ github.ref_name }}\`\n**Commit:** [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})\n**Author:** ${{ github.actor }}\n\n[View Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"color\": 15158332}]}" \
-            $DISCORD_WEBHOOK
