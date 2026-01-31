@@ -13,7 +13,8 @@ env:
 jobs:
   build-intel:
     name: Build macOS Intel (x86_64)
-    runs-on: macos-13
+    # [修改点] 改用 macos-latest (目前通常是 macos-14/ARM)，我们将在其上交叉编译 Intel 版本
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +32,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          # 关键：安装 Intel 架构的编译目标，允许在 ARM 机器上编译 Intel 软件
           targets: x86_64-apple-darwin
 
       - name: Rust cache
@@ -49,18 +51,21 @@ jobs:
           set -e
           mkdir -p src-tauri/binaries
 
+          # 硬编码针对 Intel Mac 的参数
           ASSET_PATTERN="*darwin_amd64.tar.gz"
           BINARY="cliproxyapi-x86_64-apple-darwin"
 
           echo "Downloading CLIProxyAPIPlus for x86_64-apple-darwin..."
           cd /tmp
           
+          # 下载核心文件
           gh release download --repo router-for-me/CLIProxyAPIPlus --pattern "$ASSET_PATTERN" --clobber
 
           ARCHIVE=$(ls $ASSET_PATTERN 2>/dev/null | head -1)
           echo "Extracting $ARCHIVE..."
           tar -xzf "$ARCHIVE"
 
+          # 文件名检测逻辑
           if [ -f "cli-proxy-api-plus" ]; then
             cp cli-proxy-api-plus "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
             chmod +x "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
@@ -92,6 +97,7 @@ jobs:
 
       - name: Build Tauri app
         shell: bash
+        # 即使在 ARM 机器上，指定 --target x86_64... 也能成功构建出 Intel 安装包
         run: pnpm tauri build --target x86_64-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":false}}'
         env:
           APPIMAGELAUNCHER_DISABLE: 1
@@ -100,5 +106,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: proxypal-macos-intel
+          # 注意：路径要匹配你的构建目标
           path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
