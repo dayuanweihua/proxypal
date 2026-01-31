@@ -1,4 +1,4 @@
-name: MacOS Build
+name: MacOS Intel Build Only
 
 on:
   workflow_dispatch:
@@ -11,24 +11,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Apple Silicon (M1/M2/M3...)
-          - platform: macOS-ARM
-            os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-          # Intel Mac
-          - platform: macOS-Intel
-            os: macos-13  # 使用更通用的 Intel Runner 版本 (Ventura)
-            target: x86_64-apple-darwin
-            artifact_path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-
-    runs-on: ${{ matrix.os }}
+  build-intel:
+    name: Build macOS Intel (x86_64)
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +31,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-apple-darwin
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -64,38 +49,18 @@ jobs:
           set -e
           mkdir -p src-tauri/binaries
 
-          case "${{ matrix.target }}" in
-            aarch64-apple-darwin)
-              ASSET_PATTERN="*darwin_arm64.tar.gz"
-              BINARY="cliproxyapi-aarch64-apple-darwin"
-              ARCHIVE_TYPE="tar"
-              ;;
-            x86_64-apple-darwin)
-              ASSET_PATTERN="*darwin_amd64.tar.gz"
-              BINARY="cliproxyapi-x86_64-apple-darwin"
-              ARCHIVE_TYPE="tar"
-              ;;
-            *)
-              echo "Unknown target: ${{ matrix.target }}"
-              exit 1
-              ;;
-          esac
+          ASSET_PATTERN="*darwin_amd64.tar.gz"
+          BINARY="cliproxyapi-x86_64-apple-darwin"
 
-          echo "Downloading CLIProxyAPIPlus for ${{ matrix.target }}..."
+          echo "Downloading CLIProxyAPIPlus for x86_64-apple-darwin..."
           cd /tmp
-          # 这里使用了修正后的 Plus 仓库地址
+          
           gh release download --repo router-for-me/CLIProxyAPIPlus --pattern "$ASSET_PATTERN" --clobber
 
           ARCHIVE=$(ls $ASSET_PATTERN 2>/dev/null | head -1)
           echo "Extracting $ARCHIVE..."
+          tar -xzf "$ARCHIVE"
 
-          if [ "$ARCHIVE_TYPE" = "zip" ]; then
-            unzip -q "$ARCHIVE"
-          else
-            tar -xzf "$ARCHIVE"
-          fi
-
-          # 增强后的二进制文件名称检测逻辑 (优先检测 Plus 版本)
           if [ -f "cli-proxy-api-plus" ]; then
             cp cli-proxy-api-plus "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
             chmod +x "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
@@ -117,24 +82,23 @@ jobs:
             cp cli-proxy-api "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
             chmod +x "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
           else
-            echo "Binary not found!"
+            echo "Binary not found in extracted archive!"
             ls -la
             exit 1
           fi
 
-          echo "Downloaded and prepared binary:"
+          echo "Binary prepared successfully:"
           ls -la "$GITHUB_WORKSPACE/src-tauri/binaries/"
 
       - name: Build Tauri app
         shell: bash
-        # 关闭自动更新工件生成，加快构建速度
-        run: pnpm tauri build --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: pnpm tauri build --target x86_64-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":false}}'
         env:
           APPIMAGELAUNCHER_DISABLE: 1
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: proxypal-${{ matrix.target }}
-          path: ${{ matrix.artifact_path }}
+          name: proxypal-macos-intel
+          path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
